@@ -14,7 +14,10 @@ logger.setLevel(logging.INFO)
 WS_URL = "wss://trade.definedgesecurities.com/NorenWSTRTP/"
 
 class WSManager:
-    def __init__(self, session: Optional[SessionManager] = None):
+    def __init__(self, session: Optional[SessionManager] = None, oco_manager: Optional[Any] = None):
+        """
+        oco_manager: optional OCOManager instance. If provided, WSManager will forward order-related messages to it.
+        """
         self.session = session or SessionManager.get()
         self.ws: Optional[WebSocketApp] = None
         self._thread: Optional[threading.Thread] = None
@@ -25,6 +28,8 @@ class WSManager:
         # DB
         self.conn = get_sqlite_conn()
         init_db_schema(self.conn)
+        # OCO integration
+        self.oco_manager = oco_manager
 
     def _on_open(self, ws):
         logger.info("WS opened, sending connect payload")
@@ -45,7 +50,6 @@ class WSManager:
         # if touchline feed ack or feed update, parse
         t = data.get("t")
         if t in ("tk", "tf"):  # subscription ack or feed
-            # feed may contain tk (token) and lp (LTP), exchange 'e'
             exch = data.get("e")
             tk = data.get("tk")
             lp = data.get("lp") or data.get("lp")
@@ -54,15 +58,32 @@ class WSManager:
             if exch and tk:
                 key = f"{exch}|{str(tk)}"
                 # update in-memory
-                self._ltp_cache[key] = {"lp": float(lp) if lp else None, "pc": float(pc) if pc else None, "ts": ts}
+                try:
+                    self._ltp_cache[key] = {"lp": float(lp) if lp is not None else None, "pc": float(pc) if pc is not None else None, "ts": ts}
+                except Exception:
+                    self._ltp_cache[key] = {"lp": None, "pc": None, "ts": ts}
                 # persist to DB
                 try:
                     cur = self.conn.cursor()
                     cur.execute("INSERT OR REPLACE INTO ltp_cache (exchange, token, lp, pc, ts) VALUES (?,?,?,?,?)",
-                                (exch, str(tk), float(lp) if lp else None, float(pc) if pc else None, ts))
+                                (exch, str(tk), float(lp) if lp is not None else None, float(pc) if pc is not None else None, ts))
                     self.conn.commit()
                 except Exception as e:
                     logger.debug("Failed writing ltp to DB: %s", e)
+
+        # Forward messages to OCO manager if message looks like an order update
+        # Best-effort detection: presence of 'order_id' / 'orderid' / 'order_status' / 'filled_qty'
+        try:
+            if self.oco_manager:
+                if any(k in data for k in ("order_id", "orderid", "order_status", "filled_qty", "filledQty", "orderStatus")):
+                    try:
+                        self.oco_manager.handle_order_update(data)
+                    except Exception as e:
+                        logger.exception("Error while forwarding order update to OCO manager: %s", e)
+        except Exception:
+            # defensive: ensure ws flow not broken by OCO errors
+            pass
+
         # call user callback for all messages
         if self.on_message_cb:
             try:
@@ -144,4 +165,3 @@ class WSManager:
         except Exception:
             pass
         return None
-
