@@ -1,126 +1,86 @@
 # frontend/streamlit_app.py
 
+# --- Path fix for project_root imports ---
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+# --- Standard imports ---
 import streamlit as st
-import threading
-import time
+from datetime import datetime
+
+# --- Trading engine imports ---
 from trading_engine.session import SessionManager, SessionError
-from trading_engine.websocket import WSClient
-from trading_engine.orders import OCOManager
+from trading_engine.api_client import APIClient
+from trading_engine.websocket import WebSocketManager
 
-# ----------------------
-# Streamlit App Config
-# ----------------------
-st.set_page_config(page_title="Definedge Trading Bot", layout="wide")
+# --- Initialize session manager ---
+session_mgr = SessionManager()
 
-# ----------------------
-# Sidebar - Login
-# ----------------------
-st.sidebar.title("Login / Session")
+# --- Streamlit UI ---
+st.set_page_config(page_title="Definedge Trading Demo", layout="wide")
 
-api_token = st.sidebar.text_input("API Token")
-api_secret = st.sidebar.text_input("API Secret", type="password")
-totp_code = st.sidebar.text_input("TOTP / OTP")
+st.title("📈 Definedge Trading Bot Demo")
 
-login_btn = st.sidebar.button("Login")
+# --- Login Section ---
+st.header("Step 1: Login / Authentication")
+if "api_session_key" not in st.session_state:
+    api_token = st.text_input("API Token", type="password")
+    api_secret = st.text_input("API Secret", type="password")
+    totp_secret = st.text_input("TOTP Secret", type="password")
 
-if "session" not in st.session_state:
-    st.session_state.session = None
-
-if login_btn:
-    try:
-        session = SessionManager(api_token, api_secret)
-        session.login(otp_code=totp_code)
-        st.session_state.session = session
-        st.success("Login successful!")
-    except SessionError as e:
-        st.error(f"Login failed: {str(e)}")
-
-# ----------------------
-# WebSocket Setup
-# ----------------------
-if st.session_state.session:
-    if "ws_client" not in st.session_state:
-        st.session_state.ws_client = WSClient(
-            uid=st.session_state.session.uid,
-            actid=st.session_state.session.actid,
-            susertoken=st.session_state.session.susertoken
-        )
-        ws_client = st.session_state.ws_client
-
-        # Start websocket in background thread
-        def start_ws():
-            ws_client.connect()
-            ws_client.run_forever()
-
-        ws_thread = threading.Thread(target=start_ws, daemon=True)
-        ws_thread.start()
-
-# ----------------------
-# Holdings Panel
-# ----------------------
-st.title("Holdings & Positions")
-holdings_placeholder = st.empty()
-positions_placeholder = st.empty()
-
-def update_holdings_panel():
-    while True:
-        if st.session_state.session and st.session_state.ws_client:
-            holdings_data = st.session_state.ws_client.get_holdings()
-            positions_data = st.session_state.ws_client.get_positions()
-
-            holdings_placeholder.dataframe(holdings_data)
-            positions_placeholder.dataframe(positions_data)
-
-        time.sleep(2)  # update interval
-
-if st.session_state.session and "holdings_thread" not in st.session_state:
-    holdings_thread = threading.Thread(target=update_holdings_panel, daemon=True)
-    holdings_thread.start()
-    st.session_state.holdings_thread = holdings_thread
-
-# ----------------------
-# OCO Panel
-# ----------------------
-st.subheader("OCO Orders / Trailing Stop Loss")
-
-oco_manager = OCOManager(session=st.session_state.session)
-
-oco_form = st.form("oco_form")
-with oco_form:
-    exchange = st.selectbox("Exchange", ["NSE", "BSE", "NFO", "MCX"])
-    symbol = st.text_input("Trading Symbol")
-    quantity = st.number_input("Quantity", min_value=1, value=1)
-    target_price = st.number_input("Target Price", min_value=0.0, value=0.0)
-    stoploss_price = st.number_input("Stop Loss Price", min_value=0.0, value=0.0)
-    submit_oco = st.form_submit_button("Create OCO Group")
-
-if submit_oco:
-    try:
-        group_id = oco_manager.create_group(
-            exchange=exchange,
-            symbol=symbol,
-            quantity=quantity,
-            target_price=target_price,
-            stoploss_price=stoploss_price
-        )
-        st.success(f"OCO Group Created: {group_id}")
-    except Exception as e:
-        st.error(f"Failed to create OCO group: {str(e)}")
-
-# Display existing OCO groups with cancel option
-st.subheader("Existing OCO Groups")
-oco_groups = oco_manager.get_all_groups()
-for group in oco_groups:
-    col1, col2 = st.columns([4,1])
-    col1.write(f"Group ID: {group['id']} | Symbol: {group['symbol']} | Qty: {group['quantity']} | Status: {group['status']}")
-    if col2.button(f"Cancel {group['id']}", key=f"cancel_{group['id']}"):
+    if st.button("Login"):
         try:
-            oco_manager.cancel_group(group["id"])
-            st.success(f"Cancelled OCO Group {group['id']}")
-        except Exception as e:
-            st.error(f"Failed to cancel group: {str(e)}")
+            login_response = session_mgr.login(
+                api_token=api_token,
+                api_secret=api_secret,
+                totp_secret=totp_secret
+            )
+            st.session_state.api_session_key = login_response["api_session_key"]
+            st.session_state.susertoken = login_response["susertoken"]
+            st.success("Login successful!")
+        except SessionError as e:
+            st.error(f"Login failed: {e}")
 
-# ----------------------
-# Footer / Info
-# ----------------------
-st.info("Live update every 2 sec | WebSocket connected | OCO auto management active")
+# --- Display account info if logged in ---
+if "api_session_key" in st.session_state:
+    st.header("Account Info")
+    st.json({
+        "api_session_key": st.session_state.api_session_key,
+        "susertoken": st.session_state.susertoken
+    })
+
+# --- Holdings / Positions Section ---
+st.header("📊 Holdings & Positions")
+if "api_session_key" in st.session_state:
+    client = APIClient(session_key=st.session_state.api_session_key)
+    try:
+        holdings = client.get_holdings()
+        positions = client.get_positions()
+        st.subheader("Holdings")
+        st.dataframe(holdings)
+        st.subheader("Positions")
+        st.dataframe(positions)
+    except Exception as e:
+        st.error(f"Failed to fetch holdings/positions: {e}")
+
+# --- WebSocket Live Updates ---
+st.header("💹 Live Market Updates")
+if "susertoken" in st.session_state:
+    ws_mgr = WebSocketManager(
+        uid="your_uid_here",
+        actid="your_actid_here",
+        susertoken=st.session_state.susertoken
+    )
+    if st.button("Connect WebSocket"):
+        ws_mgr.connect()
+        st.success("WebSocket connected. Live updates will appear in console/logs.")
+
+# --- Orders Section ---
+st.header("📝 Orders")
+if "api_session_key" in st.session_state:
+    st.write("Order operations will be implemented here (OCO, TSL, Regular orders).")
+
+# --- Historical Data Section ---
+st.header("🕰️ Historical Data")
+st.write("Historical data fetch and display will be implemented here.")
