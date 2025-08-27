@@ -4,11 +4,12 @@ from trading_engine.session import SessionManager, SessionError
 from trading_engine.api_client import APIClient
 from trading_engine.websocket import WSManager
 from trading_engine.orders import OrdersClient
+from trading_engine.orders.oco import OCOManager
 from trading_engine.portfolio import PortfolioManager
 from trading_engine.utils import init_db_schema, get_sqlite_conn
 
 st.set_page_config(page_title="Definedge Live Demo", layout="wide")
-st.title("Definedge Live Demo (Holdings, WS, Orders)")
+st.title("Definedge Live Demo (Holdings, WS, Orders, OCO)")
 
 # secrets loader
 def get_secret(key):
@@ -39,12 +40,22 @@ st.sidebar.subheader("Credentials")
 st.sidebar.write(f"API token present: {'✅' if api_token else '❌'}")
 st.sidebar.write(f"TOTP present: {'✅' if totp_secret else '❌'}")
 
-# WS manager singleton in session_state
+# Initialize OrdersClient and OCOManager first (without WS)
+orders_client = OrdersClient(APIClient(sm))
+if "oco" not in st.session_state:
+    st.session_state.oco = OCOManager(orders_client=orders_client, ws_manager=None)
+
+oco: OCOManager = st.session_state.oco
+
+# WS manager: pass oco_manager so WS forwards order updates to OCO
 if "ws" not in st.session_state:
-    st.session_state.ws = WSManager(sm)
+    st.session_state.ws = WSManager(sm, oco_manager=oco)
+    # make sure OCO has a reference to ws for TSL operations
+    oco.ws = st.session_state.ws
 
-ws: WSManager = st.session_state.ws
+ws = st.session_state.ws
 
+# ---- Login / session area ----
 st.header("Login / Session")
 col1, col2 = st.columns(2)
 with col1:
@@ -73,15 +84,6 @@ with col2:
             st.error(f"Step2 failed: {e}")
 
 st.divider()
-st.subheader("Session Status")
-if sm.api_session_key:
-    st.success("Logged in")
-    st.write("UID:", sm.uid)
-    st.write("User:", sm.uname)
-else:
-    st.warning("Not logged in")
-
-st.divider()
 st.subheader("WebSocket (start/subscribe)")
 
 colws1, colws2 = st.columns(2)
@@ -101,6 +103,35 @@ with colws2:
             st.success(f"Subscribed {len(tokens)}")
         except Exception as e:
             st.error(f"Subscribe error: {e}")
+
+st.divider()
+st.subheader("OCO Groups")
+# list groups
+try:
+    groups = oco.list_groups()
+    if not groups:
+        st.info("No OCO groups found.")
+    else:
+        for g in groups:
+            gid = g["group_id"]
+            col_a, col_b = st.columns([3,1])
+            with col_a:
+                st.markdown(f"**Group {gid}** — UUID: {g.get('uuid')} — Status: {g.get('status')}")
+                st.json({"metadata": g.get("metadata"), "parent_order_id": g.get("parent_order_id")})
+                children = oco.list_children(gid)
+                st.markdown("Children:")
+                for c in children:
+                    st.write(f"- child_id={c['child_id']}, role={c['role']}, qty={c['qty']}, price={c['price']}, order_id={c['order_id']}, status={c['status']}")
+            with col_b:
+                if st.button(f"Cancel Group {gid}", key=f"cancel_{gid}"):
+                    try:
+                        res = oco.cancel_group(gid)
+                        st.success(f"Cancel requested for group {gid}")
+                        st.json(res)
+                    except Exception as e:
+                        st.error(f"Cancel failed: {e}")
+except Exception as e:
+    st.error(f"OCO list error: {e}")
 
 st.divider()
 st.subheader("Live Holdings (uses WS LTP cache)")
