@@ -1,33 +1,42 @@
-# trading_engine/orders.py
-import logging
-from typing import Dict, Any, Optional
-from .api_client import APIClient
+import pandas as pd
+import os
+from utils.file_manager import ensure_folder
 
-logger = logging.getLogger("trading_engine.orders")
-logger.setLevel(logging.INFO)
+ORDERS_FILE = "data/orders.csv"
+SYMBOLS_FILE = "data/symbols.csv"
 
-class OrderManager:
-    def __init__(self, api_client: APIClient):
-        self.client = api_client
+def ensure_orders_file():
+    ensure_folder("data")
+    if not os.path.exists(ORDERS_FILE):
+        df = pd.DataFrame(columns=["symbol", "side", "quantity", "price", "type", "status"])
+        df.to_csv(ORDERS_FILE, index=False)
 
-    def place_order(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self.client.place_order(payload)
-
-    def cancel_order(self, order_id: str) -> Dict[str, Any]:
-        return self.client.cancel_order(order_id)
-
-    def modify_order(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self.client.modify_order(payload)
-
-    # Wrapper helpers
-    def place_market_order(self, exchange: str, tradingsymbol: str, qty: int, product_type: str, order_type: str):
-        payload = {
-            "price_type": "MARKET",
-            "tradingsymbol": tradingsymbol,
-            "quantity": str(qty),
-            "price": "0",
-            "product_type": product_type,
-            "order_type": order_type,
-            "exchange": exchange
+def place_order(symbol, side, qty, price, order_type="MARKET"):
+    """
+    Place Order -> For now it just logs into CSV (later can integrate broker API)
+    """
+    ensure_orders_file()
+    try:
+        df = pd.read_csv(ORDERS_FILE)
+        new_order = {
+            "symbol": symbol,
+            "side": side,
+            "quantity": qty,
+            "price": price,
+            "type": order_type,
+            "status": "OPEN"
         }
-        return self.place_order(payload)
+        df = pd.concat([df, pd.DataFrame([new_order])], ignore_index=True)
+        df.to_csv(ORDERS_FILE, index=False)
+        return {"status": "success", "message": "Order logged"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+def get_all_symbols():
+    """
+    Return symbol list for dropdown (from symbols.csv or default NIFTY50)
+    """
+    if os.path.exists(SYMBOLS_FILE):
+        df = pd.read_csv(SYMBOLS_FILE)
+        return df["symbol"].tolist()
+    return ["RELIANCE", "HDFCBANK", "INFY", "TCS", "SBIN"]
