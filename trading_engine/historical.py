@@ -1,60 +1,59 @@
 # trading_engine/historical.py
-from __future__ import annotations
-import logging
-from datetime import datetime, timedelta
-import pandas as pd
+
 import os
-from typing import Optional
+import datetime
+from trading_engine.api_client import api_client
+from utils.file_manager import save_json, load_json
 
-from utils.file_manager import path_hist_day_nse, read_csv_safe
+DATA_DIR = "data/historical"
 
-log = logging.getLogger("trading_engine.historical")
-log.setLevel(logging.INFO)
+def ensure_data_dir():
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
 
-def _last_trading_close_before(token: str, before_date: datetime) -> Optional[float]:
+def get_historical_data(symbol: str, start_date: str, end_date: str, interval: str = "1d"):
     """
-    Return the close price for the last available trading day strictly BEFORE `before_date`.
-    If no file or no rows, returns None.
+    Fetches historical data for given symbol between dates.
+    Stores locally to avoid re-downloads.
     """
-    path = path_hist_day_nse(token)
-    df = read_csv_safe(path)
-    if df is None or df.empty:
+    ensure_data_dir()
+    file_path = os.path.join(DATA_DIR, f"{symbol}_{interval}.json")
+
+    # Try cached data
+    cached = load_json(file_path)
+    if cached:
+        return cached
+
+    # Otherwise fetch from API
+    data = api_client.get_historical(symbol, start_date, end_date, interval)
+    save_json(file_path, data)
+    return data
+
+def get_previous_close(symbol: str, reference_date=None):
+    """
+    Get last available trading day's close (skips weekends/holidays).
+    """
+    ensure_data_dir()
+    if reference_date is None:
+        reference_date = datetime.date.today()
+
+    # Go back max 10 days to ensure we cover long weekends
+    start_date = reference_date - datetime.timedelta(days=10)
+    end_date = reference_date - datetime.timedelta(days=1)
+
+    data = api_client.get_historical(
+        symbol,
+        start_date.strftime("%Y-%m-%d"),
+        reference_date.strftime("%Y-%m-%d"),
+        interval="1d"
+    )
+
+    if not data:
         return None
-    # Ensure datetime column
-    if "datetime" not in df.columns:
-        # try first col as datetime
-        df.columns = ["datetime"] + df.columns.tolist()[1:]
-    df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-    df = df.dropna(subset=["datetime"])
-    df = df.sort_values("datetime")
-    # keep only dates strictly before the given date (we treat before_date date part)
-    cutoff = pd.to_datetime(before_date).normalize()
-    df_before = df[df["datetime"] < cutoff]
-    if df_before.empty:
-        return None
-    last_row = df_before.iloc[-1]
-    # handle daily format: close column name 'close'
-    if "close" in last_row.index:
-        return float(last_row["close"])
-    # fallback if only 1-column
-    vals = last_row.values
-    for v in reversed(vals):
-        try:
-            return float(v)
-        except Exception:
-            continue
-    return None
 
-def get_previous_trading_close(token: str, ref_dt: Optional[datetime] = None) -> Optional[float]:
-    """
-    Public helper: returns previous trading day's close for token (NSE).
-    - ref_dt: reference datetime (defaults to now). We return close for last trading day < ref_dt.date()
-    - Uses local historical CSV; does NOT call network.
-    """
-    if ref_dt is None:
-        ref_dt = datetime.now()
-    try:
-        return _last_trading_close_before(token, ref_dt)
-    except Exception as e:
-        log.exception("get_previous_trading_close failed for %s: %s", token, e)
+    # Last valid close
+    closes = [d for d in data if "close" in d]
+    if not closes:
         return None
+
+    return closes[-1]["close"]
