@@ -1,9 +1,11 @@
 # trading_engine/__init__.py
-# Expose handy imports
-from .session import SessionManager
+# Empty file to mark this folder as a package.
+# Optional: import commonly used classes for convenience
+
 from .api_client import APIClient
-from .websocket import WSManager
 from .marketdata import MarketData
-from .orders import OrdersClient
+from .orders import OrderManager
 from .portfolio import PortfolioManager
-from .utils import now_ts
+from .session import SessionManager, SessionError
+from .utils import *
+from .websocket import WebSocketManager
