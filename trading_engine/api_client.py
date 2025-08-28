@@ -1,127 +1,123 @@
-# trading_engine/api_client.py
+import os
 import time
-import logging
-from typing import Optional, Dict, Any
+import json
 import requests
-from .session import SessionManager, SessionError
+import zipfile
+import io
+from datetime import datetime
+from trading_engine.session import SessionManager, SessionError
 
-logger = logging.getLogger("trading_engine.api_client")
-logger.setLevel(logging.INFO)
-
-CORE_BASE = "https://integrate.definedgesecurities.com/dart/v1"
-HIST_BASE = "https://data.definedgesecurities.com/sds/history"
-MASTER_BASE = "https://app.definedgesecurities.com/public"
+BASE_URL = "https://integrate.definedgesecurities.com/dart/v1"
+HISTORICAL_URL = "https://data.definedgesecurities.com/sds/history/{segment}/{token}/{timeframe}/{from}/{to}"
+MASTER_URLS = {
+    "NSE_CASH": "https://app.definedgesecurities.com/public/nsecash.zip",
+    "NSE_FNO": "https://app.definedgesecurities.com/public/nsefno.zip",
+    "BSE_CASH": "https://app.definedgesecurities.com/public/bsecash.zip",
+    "BSE_FNO": "https://app.definedgesecurities.com/public/bsefno.zip",
+    "MCX_FNO": "https://app.definedgesecurities.com/public/mcxfno.zip",
+    "ALL": "https://app.definedgesecurities.com/public/allmaster.zip"
+}
 
 class APIClient:
-    def __init__(self, session: Optional[SessionManager] = None, timeout: int = 10):
-        self.session = session or SessionManager.get()
-        self.timeout = timeout
+    def __init__(self, api_token: str, api_secret: str, totp_secret: str = None):
+        self.api_token = api_token
+        self.api_secret = api_secret
+        self.totp_secret = totp_secret
+        self.session = SessionManager()
+        self.api_session_key = None
+        self.susertoken = None
+        self.ltp_cache = {}
 
-    def _headers(self, include_auth: bool = True) -> Dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if include_auth:
-            # SessionManager.get_auth_headers returns {"Authorization": api_session_key}
-            headers.update(self.session.get_auth_headers())
-        return headers
+    # ------------------ Authentication ------------------
+    def login(self, otp: str = None):
+        """
+        Login using OTP or TOTP. Stores api_session_key and susertoken in SessionManager.
+        """
+        url = f"https://signin.definedgesecurities.com/auth/realms/debroking/dsbpkc/login/{self.api_token}"
+        payload = {"otp": otp} if otp else {}
+        headers = {"api_secret": self.api_secret}
+        resp = requests.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if "api_session_key" not in data or "susertoken" not in data:
+            raise SessionError("Login failed: api_session_key or susertoken missing")
+        self.api_session_key = data["api_session_key"]
+        self.susertoken = data["susertoken"]
+        self.session.save_session_key(self.api_session_key)
+        return data
 
-    def _request(self, method: str, url: str, *, params: dict = None, json_body: dict = None, include_auth: bool = True) -> Any:
-        try:
-            r = requests.request(method, url, headers=self._headers(include_auth), params=params, json=json_body, timeout=self.timeout)
-            if r.status_code == 401:
-                # bubble up so caller can refresh
-                logger.warning("401 Unauthorized from API: %s", url)
-                raise SessionError("Unauthorized (401)")
-            r.raise_for_status()
-            try:
-                return r.json()
-            except ValueError:
-                return r.text
-        except requests.RequestException as e:
-            logger.error("API request failed (%s): %s", url, e)
-            raise
+    # ------------------ Internal request helpers ------------------
+    def _get_headers(self):
+        if not self.api_session_key:
+            raise SessionError("API session key not found. Login first.")
+        return {"Authorization": self.api_session_key, "Content-Type": "application/json"}
 
-    # Core endpoints
-    def place_order(self, payload: dict) -> dict:
-        url = CORE_BASE + "/placeorder"
-        return self._request("POST", url, json_body=payload)
+    def _get(self, relative_url, params=None):
+        url = f"{BASE_URL}{relative_url}"
+        resp = requests.get(url, headers=self._get_headers(), params=params)
+        resp.raise_for_status()
+        return resp.json()
 
-    def get_orders(self, params: dict = None) -> dict:
-        url = CORE_BASE + "/orders"
-        return self._request("GET", url, params=params)
+    def _post(self, relative_url, data):
+        url = f"{BASE_URL}{relative_url}"
+        resp = requests.post(url, headers=self._get_headers(), json=data)
+        resp.raise_for_status()
+        return resp.json()
 
-    def get_order(self, order_id: str) -> dict:
-        url = CORE_BASE + f"/order/{order_id}"
-        return self._request("GET", url)
+    # ------------------ Trading API ------------------
+    def get_holdings(self):
+        return self._get("/holdings")
 
-    def modify_order(self, payload: dict) -> dict:
-        url = CORE_BASE + "/modify"
-        return self._request("POST", url, json_body=payload)
+    def get_positions(self):
+        return self._get("/positions")
 
-    def cancel_order(self, order_id: str) -> dict:
-        url = CORE_BASE + f"/cancel/{order_id}"
-        return self._request("POST", url)
+    def get_orders(self):
+        return self._get("/orders")
 
-    def slice_order(self, payload: dict) -> dict:
-        url = CORE_BASE + "/sliceorder"
-        return self._request("POST", url, json_body=payload)
+    def get_trades(self):
+        return self._get("/trades")
 
-    # GTT endpoints
-    def get_gtts(self) -> dict:
-        url = CORE_BASE + "/gttorders"
-        return self._request("GET", url)
+    def place_order(self, order_data: dict):
+        return self._post("/placeorder", order_data)
 
-    def place_gtt(self, payload: dict) -> dict:
-        url = CORE_BASE + "/gttplaceorder"
-        return self._request("POST", url, json_body=payload)
+    def cancel_order(self, order_id: str):
+        return self._post(f"/cancel/{order_id}", {})
 
-    def modify_gtt(self, payload: dict) -> dict:
-        url = CORE_BASE + "/gttmodify"
-        return self._request("POST", url, json_body=payload)
+    def get_margin(self):
+        return self._get("/margin")
 
-    def cancel_gtt(self, alert_id: str) -> dict:
-        url = CORE_BASE + f"/gttcancel/{alert_id}"
-        return self._request("POST", url)
+    def get_limits(self):
+        return self._get("/limits")
 
-    # OCO endpoints
-    def place_oco(self, payload: dict) -> dict:
-        url = CORE_BASE + "/ocoplaceorder"
-        return self._request("POST", url, json_body=payload)
+    def get_quote(self, exchange, token):
+        return self._get(f"/quotes/{exchange}/{token}")
 
-    def modify_oco(self, payload: dict) -> dict:
-        url = CORE_BASE + "/ocomodify"
-        return self._request("POST", url, json_body=payload)
+    # ------------------ Master & Historical ------------------
+    def download_master(self, segment="ALL", save_path="./data/master.csv"):
+        url = MASTER_URLS.get(segment.upper(), MASTER_URLS["ALL"])
+        r = requests.get(url)
+        r.raise_for_status()
+        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+            z.extractall(os.path.dirname(save_path))
+        return save_path
 
-    def cancel_oco(self, alert_id: str) -> dict:
-        url = CORE_BASE + f"/ococancel/{alert_id}"
-        return self._request("POST", url)
+    def get_historical(self, segment, token, timeframe, from_dt, to_dt):
+        """
+        from_dt and to_dt should be datetime objects.
+        """
+        from_str = from_dt.strftime("%d%m%Y%H%M")
+        to_str = to_dt.strftime("%d%m%Y%H%M")
+        url = HISTORICAL_URL.format(segment=segment, token=token, timeframe=timeframe,
+                                    from=from_str, to=to_str)
+        resp = requests.get(url, headers={"Authorization": self.api_session_key})
+        resp.raise_for_status()
+        return resp.text
 
-    # Margin / limits
-    def get_limits(self) -> dict:
-        url = CORE_BASE + "/limits"
-        return self._request("GET", url)
-
-    def get_margin(self, payload: dict = None) -> dict:
-        url = CORE_BASE + "/margin"
-        # some implementations accept POST for margin with body, but docs show GET - support both
-        if payload:
-            return self._request("POST", url, json_body=payload)
-        return self._request("GET", url)
-
-    def spancalculator(self, payload: dict) -> dict:
-        url = CORE_BASE + "/spancalculator"
-        return self._request("POST", url, json_body=payload)
-
-    # Quotes / security info
-    def get_quote(self, exchange: str, token: str) -> dict:
-        url = CORE_BASE + f"/quotes/{exchange}/{token}"
-        return self._request("GET", url)
-
-    def get_security_info(self, exchange: str, token: str) -> dict:
-        url = CORE_BASE + f"/securityinfo/{exchange}/{token}"
-        return self._request("GET", url)
-
-    # Historical
-    def get_historical(self, segment: str, token: str, timeframe: str, frm: str, to: str) -> str:
-        url = f"{HIST_BASE}/{segment}/{token}/{timeframe}/{frm}/{to}"
-        # historical API requires Authorization header too:
-        return self._request("GET", url)
+    # ------------------ WebSocket placeholder ------------------
+    def subscribe_tokens(self, token_list):
+        """
+        Placeholder method for subscribing to tokens in WebSocket.
+        token_list: list of "EX|TOKEN" strings
+        """
+        # This will be implemented in websocket.py
+        pass
