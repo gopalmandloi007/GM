@@ -1,123 +1,184 @@
-import os
-import time
-import json
 import requests
-import zipfile
-import io
-from datetime import datetime
-from trading_engine.session import SessionManager, SessionError
+import logging
+from datetime import datetime, timedelta
 
-BASE_URL = "https://integrate.definedgesecurities.com/dart/v1"
-HISTORICAL_URL = "https://data.definedgesecurities.com/sds/history/{segment}/{token}/{timeframe}/{from}/{to}"
-MASTER_URLS = {
-    "NSE_CASH": "https://app.definedgesecurities.com/public/nsecash.zip",
-    "NSE_FNO": "https://app.definedgesecurities.com/public/nsefno.zip",
-    "BSE_CASH": "https://app.definedgesecurities.com/public/bsecash.zip",
-    "BSE_FNO": "https://app.definedgesecurities.com/public/bsefno.zip",
-    "MCX_FNO": "https://app.definedgesecurities.com/public/mcxfno.zip",
-    "ALL": "https://app.definedgesecurities.com/public/allmaster.zip"
-}
+# Exceptions
+class SessionError(Exception):
+    pass
+
+class APIError(Exception):
+    pass
 
 class APIClient:
+    BASE_URL = "https://integrate.definedgesecurities.com/dart/v1"
+    HISTORICAL_URL = "https://data.definedgesecurities.com/sds/history"
+    MASTER_URLS = {
+        "NSE_CASH": "https://app.definedgesecurities.com/public/nsecash.zip",
+        "NSE_FNO": "https://app.definedgesecurities.com/public/nsefno.zip",
+        "BSE_CASH": "https://app.definedgesecurities.com/public/bsecash.zip",
+        "BSE_FNO": "https://app.definedgesecurities.com/public/bsefno.zip",
+        "MCX_FNO": "https://app.definedgesecurities.com/public/mcxfno.zip",
+        "ALL": "https://app.definedgesecurities.com/public/allmaster.zip"
+    }
+
     def __init__(self, api_token: str, api_secret: str, totp_secret: str = None):
         self.api_token = api_token
         self.api_secret = api_secret
         self.totp_secret = totp_secret
-        self.session = SessionManager()
         self.api_session_key = None
         self.susertoken = None
-        self.ltp_cache = {}
+        self.uid = None
+        self.headers = {}
+        logging.basicConfig(level=logging.INFO)
 
-    # ------------------ Authentication ------------------
-    def login(self, otp: str = None):
-        """
-        Login using OTP or TOTP. Stores api_session_key and susertoken in SessionManager.
-        """
-        url = f"https://signin.definedgesecurities.com/auth/realms/debroking/dsbpkc/login/{self.api_token}"
-        payload = {"otp": otp} if otp else {}
+    # ------------------- LOGIN & SESSION -------------------
+    def login(self, otp_code: str = None):
+        """Perform login using OTP/TOTP"""
+        auth_url = f"https://signin.definedgesecurities.com/auth/realms/debroking/dsbpkc/login/{self.api_token}"
+        data = {"otp": otp_code or self.generate_totp()}
         headers = {"api_secret": self.api_secret}
-        resp = requests.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        if "api_session_key" not in data or "susertoken" not in data:
-            raise SessionError("Login failed: api_session_key or susertoken missing")
-        self.api_session_key = data["api_session_key"]
-        self.susertoken = data["susertoken"]
-        self.session.save_session_key(self.api_session_key)
-        return data
 
-    # ------------------ Internal request helpers ------------------
-    def _get_headers(self):
+        resp = requests.post(auth_url, json=data, headers=headers)
+        if resp.status_code != 200:
+            raise SessionError(f"Login failed: {resp.text}")
+
+        res = resp.json()
+        self.api_session_key = res.get("api_session_key")
+        self.susertoken = res.get("susertoken")
+        self.uid = res.get("uid")
         if not self.api_session_key:
-            raise SessionError("API session key not found. Login first.")
-        return {"Authorization": self.api_session_key, "Content-Type": "application/json"}
+            raise SessionError("Login failed, api_session_key missing")
 
-    def _get(self, relative_url, params=None):
-        url = f"{BASE_URL}{relative_url}"
-        resp = requests.get(url, headers=self._get_headers(), params=params)
-        resp.raise_for_status()
-        return resp.json()
+        self.headers = {"Authorization": self.api_session_key, "Content-Type": "application/json"}
+        logging.info(f"Login successful for UID {self.uid}")
+        return res
 
-    def _post(self, relative_url, data):
-        url = f"{BASE_URL}{relative_url}"
-        resp = requests.post(url, headers=self._get_headers(), json=data)
-        resp.raise_for_status()
-        return resp.json()
+    def generate_totp(self):
+        # TODO: Implement TOTP generation if needed
+        return "000000"
 
-    # ------------------ Trading API ------------------
+    # ------------------- CORE GETTERS -------------------
     def get_holdings(self):
-        return self._get("/holdings")
+        url = f"{self.BASE_URL}/holdings"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
 
     def get_positions(self):
-        return self._get("/positions")
+        url = f"{self.BASE_URL}/positions"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
 
     def get_orders(self):
-        return self._get("/orders")
+        url = f"{self.BASE_URL}/orders"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
 
     def get_trades(self):
-        return self._get("/trades")
+        url = f"{self.BASE_URL}/trades"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
 
-    def place_order(self, order_data: dict):
-        return self._post("/placeorder", order_data)
+    # ------------------- PLACE / MODIFY / CANCEL -------------------
+    def place_order(self, payload: dict):
+        url = f"{self.BASE_URL}/placeorder"
+        resp = requests.post(url, json=payload, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    def modify_order(self, order_id: str, payload: dict):
+        url = f"{self.BASE_URL}/modify"
+        payload["order_id"] = order_id
+        resp = requests.post(url, json=payload, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
 
     def cancel_order(self, order_id: str):
-        return self._post(f"/cancel/{order_id}", {})
+        url = f"{self.BASE_URL}/cancel/{order_id}"
+        resp = requests.post(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
 
+    # ------------------- GTT / OCO -------------------
+    def gtt_place(self, payload: dict):
+        url = f"{self.BASE_URL}/gttplaceorder"
+        resp = requests.post(url, json=payload, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    def gtt_modify(self, alert_id: str, payload: dict):
+        url = f"{self.BASE_URL}/gttmodify"
+        payload["alert_id"] = alert_id
+        resp = requests.post(url, json=payload, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    def gtt_cancel(self, alert_id: str):
+        url = f"{self.BASE_URL}/gttcancel/{alert_id}"
+        resp = requests.post(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    def oco_place(self, payload: dict):
+        url = f"{self.BASE_URL}/ocoplaceorder"
+        resp = requests.post(url, json=payload, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    def oco_modify(self, payload: dict):
+        url = f"{self.BASE_URL}/ocomodify"
+        resp = requests.post(url, json=payload, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    def oco_cancel(self, alert_id: str):
+        url = f"{self.BASE_URL}/ococancel/{alert_id}"
+        resp = requests.post(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    # ------------------- QUOTES -------------------
+    def get_quote(self, exchange: str, token: str):
+        url = f"{self.BASE_URL}/quotes/{exchange}/{token}"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    def get_security_info(self, exchange: str, token: str):
+        url = f"{self.BASE_URL}/securityinfo/{exchange}/{token}"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
+
+    # ------------------- MARGIN / LIMITS -------------------
     def get_margin(self):
-        return self._get("/margin")
+        url = f"{self.BASE_URL}/margin"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
 
     def get_limits(self):
-        return self._get("/limits")
-
-    def get_quote(self, exchange, token):
-        return self._get(f"/quotes/{exchange}/{token}")
-
-    # ------------------ Master & Historical ------------------
-    def download_master(self, segment="ALL", save_path="./data/master.csv"):
-        url = MASTER_URLS.get(segment.upper(), MASTER_URLS["ALL"])
-        r = requests.get(url)
-        r.raise_for_status()
-        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-            z.extractall(os.path.dirname(save_path))
-        return save_path
-
-    def get_historical(self, segment, token, timeframe, from_dt, to_dt):
-        """
-        from_dt and to_dt should be datetime objects.
-        """
-        from_str = from_dt.strftime("%d%m%Y%H%M")
-        to_str = to_dt.strftime("%d%m%Y%H%M")
-        url = HISTORICAL_URL.format(segment=segment, token=token, timeframe=timeframe,
-                                    from=from_str, to=to_str)
-        resp = requests.get(url, headers={"Authorization": self.api_session_key})
-        resp.raise_for_status()
-        return resp.text
-
-    # ------------------ WebSocket placeholder ------------------
-    def subscribe_tokens(self, token_list):
-        """
-        Placeholder method for subscribing to tokens in WebSocket.
-        token_list: list of "EX|TOKEN" strings
-        """
-        # This will be implemented in websocket.py
-        pass
+        url = f"{self.BASE_URL}/limits"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            raise APIError(resp.text)
+        return resp.json()
