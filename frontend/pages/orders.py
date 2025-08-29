@@ -1,30 +1,26 @@
 import streamlit as st
-import pandas as pd
-from trading_engine.orders import OrderManager
+from trading_engine.orders import place_order, get_all_symbols
 
-om = OrderManager()
+st.set_page_config(page_title="Orders Dashboard", layout="wide")
 
-def show_orders():
-    st.title("📝 Orders Dashboard")
+st.title("📝 Place Order")
 
-    with st.expander("📌 Place New Order"):
-        symbol = st.text_input("Symbol", value="RELIANCE")
-        qty = st.number_input("Quantity", min_value=1, value=1)
-        side = st.radio("Side", ["BUY", "SELL"], horizontal=True)
-        order_type = st.radio("Order Type", ["MARKET", "LIMIT", "SL", "SL-M"], horizontal=True)
-        price = st.number_input("Price", min_value=0.0, value=0.0) if order_type != "MARKET" else None
-        trigger_price = st.number_input("Trigger Price", min_value=0.0, value=0.0) if order_type in ["SL", "SL-M"] else None
+# Fetch All Symbols (from local db / api)
+symbols = get_all_symbols()
 
-        if st.button("🚀 Place Order"):
-            resp = om.place_order(symbol, qty, order_type=order_type, side=side, price=price, trigger_price=trigger_price)
-            st.success(resp)
+# Order Form
+with st.form("order_form", clear_on_submit=True):
+    side = st.radio("Order Side", ["BUY", "SELL"], horizontal=True)
+    symbol = st.selectbox("Select Symbol", symbols, index=0)
+    qty = st.number_input("Quantity", min_value=1, step=1)
+    price = st.number_input("Price (₹)", min_value=0.0, step=0.05, format="%.2f")
+    order_type = st.selectbox("Order Type", ["MARKET", "LIMIT"])
 
-    st.subheader("📒 Order Book")
-    orders = om.order_book()
-    if orders:
-        st.dataframe(pd.DataFrame(orders), use_container_width=True)
+    submitted = st.form_submit_button("🚀 Place Order")
 
-    st.subheader("📒 Trade Book")
-    trades = om.trade_book()
-    if trades:
-        st.dataframe(pd.DataFrame(trades), use_container_width=True)
+    if submitted:
+        result = place_order(symbol, side, qty, price, order_type)
+        if result.get("status") == "success":
+            st.success(f"✅ Order Placed: {side} {qty} {symbol} @ {price if order_type=='LIMIT' else 'MKT'}")
+        else:
+            st.error(f"❌ Failed: {result.get('message')}")
