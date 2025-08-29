@@ -1,4 +1,4 @@
-# trading_engine/websocket.py
+# gm/trading_engine/websocket.py
 import json
 import threading
 import time
@@ -12,13 +12,14 @@ logger.setLevel(logging.INFO)
 WS_URL = "wss://trade.definedgesecurities.com/NorenWSTRTP/"
 
 class WebSocketManager:
-    def __init__(self, uid: Optional[str]=None, actid: Optional[str]=None, susertoken: Optional[str]=None, on_raw: Optional[Callable]=None):
+    def __init__(self, uid: Optional[str] = None, actid: Optional[str] = None, susertoken: Optional[str] = None, on_raw: Optional[Callable] = None):
         self.uid = uid
         self.actid = actid or uid
         self.susertoken = susertoken
         self.on_raw = on_raw
         self.ws: Optional[WebSocketApp] = None
-        self.thread: Optional[threading.Thread] = None
+        self.run_thread: Optional[threading.Thread] = None
+        self.heartbeat_thread: Optional[threading.Thread] = None
         self.running = False
         self.ltp_cache: Dict[str, Dict] = {}
         self.subscribed = set()
@@ -26,7 +27,7 @@ class WebSocketManager:
 
     def _on_open(self, ws):
         logger.info("WS open. sending connect.")
-        payload = {"t":"c","uid":self.uid,"actid":self.actid,"source":"TRTP","susertoken":self.susertoken}
+        payload = {"t": "c", "uid": self.uid, "actid": self.actid, "source": "TRTP", "susertoken": self.susertoken}
         try:
             ws.send(json.dumps(payload))
         except Exception as e:
@@ -38,10 +39,10 @@ class WebSocketManager:
         except Exception:
             return
         t = data.get("t")
-        if t in ("tk","tf"):
+        if t in ("tk", "tf"):
             exch = data.get("e")
             tk = data.get("tk")
-            lp = data.get("lp")
+            lp = data.get("lp") or data.get("ltp") or data.get("last_price") or data.get("lp")
             if exch and tk:
                 key = f"{exch}|{tk}"
                 try:
@@ -76,16 +77,35 @@ class WebSocketManager:
                               on_close=self._on_close,
                               header=headers)
         self.running = True
-        def run():
+
+        def run_ws():
             while self.running:
                 try:
-                    self.ws.run_forever(ping_interval=50, ping_timeout=10)
+                    self.ws.run_forever()
                 except Exception as e:
                     logger.exception("WS run error: %s", e)
                 time.sleep(2)
-        self.thread = threading.Thread(target=run, daemon=True)
-        self.thread.start()
-        logger.info("WS thread started")
+
+        def heartbeat_loop():
+            # send json heartbeat {"t":"h"} every 50 seconds as required
+            while self.running:
+                try:
+                    if self.ws and getattr(self.ws, "sock", None) and getattr(self.ws.sock, "connected", False):
+                        try:
+                            self.ws.send(json.dumps({"t": "h"}))
+                        except Exception:
+                            logger.exception("heartbeat send failed")
+                    time.sleep(50)
+                except Exception:
+                    time.sleep(5)
+
+        self.run_thread = threading.Thread(target=run_ws, daemon=True)
+        self.run_thread.start()
+
+        self.heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+        self.heartbeat_thread.start()
+
+        logger.info("WS threads started")
 
     def stop(self):
         self.running = False
@@ -102,7 +122,7 @@ class WebSocketManager:
         if not token_keys:
             return
         k = "#".join(token_keys)
-        payload = {"t":"t", "k": k}
+        payload = {"t": "t", "k": k}
         try:
             self.ws.send(json.dumps(payload))
             with self._lock:
@@ -117,7 +137,7 @@ class WebSocketManager:
         if not token_keys:
             return
         k = "#".join(token_keys)
-        payload = {"t":"u", "k": k}
+        payload = {"t": "u", "k": k}
         try:
             self.ws.send(json.dumps(payload))
             with self._lock:
