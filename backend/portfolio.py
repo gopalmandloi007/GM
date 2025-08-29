@@ -4,7 +4,7 @@ from .marketdata import get_ltp, MarketDataService
 from .historical import get_previous_trading_close
 from .api_client import APIClient
 
-def get_holdings_with_pnl(api_client: APIClient, market_service: Optional[MarketDataService] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def get_holdings(api_client: APIClient, market_service: Optional[MarketDataService] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     raw = api_client.get_holdings()
     if isinstance(raw, dict) and "holdings" in raw:
         holdings = raw.get("holdings") or []
