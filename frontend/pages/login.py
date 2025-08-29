@@ -22,14 +22,14 @@ st.markdown(
     """
     This page logs you into Definedge using credentials stored in `.streamlit/secrets.toml`.
     - Make sure `INTEGRATE_API_TOKEN` and `INTEGRATE_API_SECRET` are present in secrets.
-    - `INTEGRATE_TOTP_SECRET` is optional. If present, TOTP will be used automatically.
+    - `TOTP_SECRET` is optional. If present, TOTP will be used automatically.
     """
 )
 
 # -- load secrets --
 API_TOKEN = st.secrets.get("INTEGRATE_API_TOKEN")
 API_SECRET = st.secrets.get("INTEGRATE_API_SECRET")
-TOTP_SECRET = st.secrets.get("INTEGRATE_TOTP_SECRET")  # optional
+TOTP_SECRET = st.secrets.get("TOTP_SECRET")  # optional
 
 if not API_TOKEN or not API_SECRET:
     st.error("Missing secrets. Add INTEGRATE_API_TOKEN and INTEGRATE_API_SECRET to .streamlit/secrets.toml")
