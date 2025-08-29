@@ -1,32 +1,24 @@
-import sys
-import os
 import streamlit as st
-
-# 🔧 Add project root to sys.path (fix for ModuleNotFoundError)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
 from trading_engine.session import SessionManager, SessionError
-
+from trading_engine.client import Client  # <-- यह तुम्हारे broker का SDK wrapper है
 
 def login_page():
-    st.title("🔑 Login to Trading Dashboard")
+    st.title("🔐 Login to Trading App")
 
-    api_key = st.text_input("API Key", type="password")
+    api_key = st.text_input("API Key")
     api_secret = st.text_input("API Secret", type="password")
-    totp_secret = st.text_input("TOTP Secret (if enabled)", type="password")
+    totp_secret = st.text_input("TOTP Secret (if any)", type="password")
 
     if st.button("Login"):
+        if not api_key or not api_secret:
+            st.error("API Key and Secret required")
+            return
+
         try:
             session_manager = SessionManager(api_key, api_secret, totp_secret)
-            session = session_manager.create_session()
-
-            # Save session in Streamlit session state
-            st.session_state["session"] = session
-            st.success("✅ Login successful! Go to other pages from sidebar.")
-
+            session = session_manager.login(Client)  # Client class से broker login होगा
+            st.session_state["session_manager"] = session_manager
+            st.success("✅ Login successful!")
+            st.switch_page("pages/02_holdings.py")  # अगली page पर redirect
         except SessionError as e:
-            st.error(f"❌ Login failed: {str(e)}")
-
-
-if __name__ == "__main__":
-    login_page()
+            st.error(f"Login failed: {e}")
