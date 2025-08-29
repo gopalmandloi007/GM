@@ -1,65 +1,72 @@
 import logging
-from trading_engine.api_client import APIClient
-from trading_engine.session import get_session
+from typing import Dict, Any
+from trading_engine.session import get_session_safe
 
 logger = logging.getLogger(__name__)
 
-class OrderManager:
-    def __init__(self):
-        self.client = APIClient()
-        self.session = get_session()
 
-    def place_order(self, symbol, qty, order_type="MARKET", side="BUY", product="CNC", price=None, trigger_price=None):
-        """
-        Place a new order (Normal + SL + SL-M + GTT).
-        """
-        payload = {
-            "symbol": symbol,
-            "quantity": qty,
-            "order_type": order_type,
-            "transaction_type": side,
-            "product": product,
-        }
+def place_order(order_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Place an order with given parameters
+    """
+    try:
+        session = get_session_safe()
+        if not session:
+            raise Exception("⚠️ No active session found. Please login first.")
 
-        if price:
-            payload["price"] = price
-        if trigger_price:
-            payload["trigger_price"] = trigger_price
+        order = session.place_order(**order_params)
+        logger.info(f"✅ Order placed: {order}")
+        return order
+    except Exception as e:
+        logger.error(f"❌ Error placing order: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
-        resp = self.client.post("/orders", payload)
-        return resp
 
-    def modify_order(self, order_id, price=None, qty=None, trigger_price=None):
-        payload = {}
-        if price:
-            payload["price"] = price
-        if qty:
-            payload["quantity"] = qty
-        if trigger_price:
-            payload["trigger_price"] = trigger_price
+def modify_order(order_id: str, update_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Modify an existing order
+    """
+    try:
+        session = get_session_safe()
+        if not session:
+            raise Exception("⚠️ No active session found.")
 
-        resp = self.client.put(f"/orders/{order_id}", payload)
-        return resp
+        order = session.modify_order(order_id, **update_params)
+        logger.info(f"✅ Order modified: {order}")
+        return order
+    except Exception as e:
+        logger.error(f"❌ Error modifying order: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
-    def cancel_order(self, order_id):
-        return self.client.delete(f"/orders/{order_id}")
 
-    def order_book(self):
-        return self.client.get("/orders")
+def cancel_order(order_id: str) -> Dict[str, Any]:
+    """
+    Cancel an existing order
+    """
+    try:
+        session = get_session_safe()
+        if not session:
+            raise Exception("⚠️ No active session found.")
 
-    def trade_book(self):
-        return self.client.get("/trades")
+        result = session.cancel_order(order_id)
+        logger.info(f"✅ Order cancelled: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Error cancelling order: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
-    def gtt_orders(self):
-        return self.client.get("/gtt")
 
-    def place_gtt(self, symbol, qty, trigger_price, price, side="BUY"):
-        payload = {
-            "symbol": symbol,
-            "quantity": qty,
-            "trigger_price": trigger_price,
-            "price": price,
-            "transaction_type": side,
-            "type": "GTT",
-        }
-        return self.client.post("/gtt", payload)
+def get_orders() -> Dict[str, Any]:
+    """
+    Fetch all orders
+    """
+    try:
+        session = get_session_safe()
+        if not session:
+            raise Exception("⚠️ No active session found.")
+
+        orders = session.get_orders()
+        return orders
+    except Exception as e:
+        logger.error(f"❌ Error fetching orders: {str(e)}")
+        return {"status": "error", "message": str(e)}
