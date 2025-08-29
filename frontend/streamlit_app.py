@@ -1,63 +1,41 @@
 import streamlit as st
-from trading_engine.session import SessionManager
-from trading_engine.holdings import get_holdings
-from trading_engine.positions import get_positions
-from trading_engine.orders import get_orderbook, place_order
-from trading_engine.trades import get_trades
 import pandas as pd
+from trading_engine.portfolio import get_holdings
+from trading_engine.session import SessionManager
 
-st.set_page_config(page_title="Definedge Trading Engine", layout="wide")
+# Secrets se load
+API_TOKEN = st.secrets["DEFINEDGE_API_TOKEN"]
+API_SECRET = st.secrets["DEFINEDGE_API_SECRET"]
+TOTP_SECRET = st.secrets.get("DEFINEDGE_TOTP_SECRET")
 
-st.title("📈 Definedge Trading Engine - Dashboard")
+# Session init
+session = SessionManager(API_TOKEN, API_SECRET, TOTP_SECRET)
 
-# Session
-if "session" not in st.session_state:
-    st.session_state.session = None
+st.title("📊 Holdings Dashboard")
 
-if st.session_state.session is None:
-    st.info("🔑 Creating session from Streamlit secrets...")
-    token = st.secrets["DEFINEDGE_API_TOKEN"]
-    secret = st.secrets["DEFINEDGE_API_SECRET"]
-    totp = st.secrets.get("DEFINEDGE_TOTP_SECRET", None)
-
-    st.session_state.session = SessionManager(api_token=token, api_secret=secret, totp_secret=totp)
-
-session = st.session_state.session
-
-tab1, tab2, tab3, tab4 = st.tabs(["Holdings", "Positions", "Orders", "Trades"])
-
-with tab1:
-    st.subheader("📊 Holdings")
+if st.button("Fetch Holdings"):
     data = get_holdings(session)
-    if data:
-        df = pd.json_normalize(data)
-        st.dataframe(df, use_container_width=True)
 
-with tab2:
-    st.subheader("📈 Positions")
-    data = get_positions(session)
-    if data:
-        df = pd.json_normalize(data)
-        st.dataframe(df, use_container_width=True)
+    if data and "data" in data:
+        holdings_list = []
 
-with tab3:
-    st.subheader("📑 Orders")
-    data = get_orderbook(session)
-    if data:
-        df = pd.json_normalize(data)
-        st.dataframe(df, use_container_width=True)
+        for item in data["data"]:
+            # Sirf NSE ka symbol show karenge for clarity
+            nse_symbol = next((s for s in item["tradingsymbol"] if s["exchange"] == "NSE"), {})
+            holdings_list.append({
+                "Symbol": nse_symbol.get("tradingsymbol", ""),
+                "ISIN": nse_symbol.get("isin", ""),
+                "DP Qty": item["dp_qty"],
+                "Used Qty": item["holding_used"],
+                "Trade Qty": item["trade_qty"],
+                "Avg Buy Price": item["avg_buy_price"],
+                "Sell Amount": item["sell_amt"],
+                "Haircut": item["haircut"]
+            })
 
-    st.markdown("### ➕ Place Order")
-    symbol = st.text_input("Symbol", "HINDWAREAP-EQ")
-    qty = st.number_input("Quantity", 1, 1000, 1)
-    side = st.radio("Side", ["BUY", "SELL"])
-    if st.button("Place Order"):
-        res = place_order(session, symbol=symbol, qty=qty, side=side)
-        st.json(res)
+        df = pd.DataFrame(holdings_list)
 
-with tab4:
-    st.subheader("💹 Trades")
-    data = get_trades(session)
-    if data:
-        df = pd.json_normalize(data)
-        st.dataframe(df, use_container_width=True)
+        st.subheader("📑 Compact Holdings Table")
+        st.dataframe(df, use_container_width=True)  # Excel-type table
+    else:
+        st.warning("⚠️ No holdings data found.")
