@@ -1,12 +1,24 @@
+# gm/frontend/pages/Portfolio.py
 import streamlit as st
-from GM.backend.holdings import get_holdings
 
-st.title("Portfolio")
+def show_portfolio():
+    st.title("📊 Portfolio")
 
-uid = st.text_input("Enter UID")
-if st.button("Fetch Holdings"):
-    data = get_holdings(uid)
-    if data:
-        st.json(data)
-    else:
-        st.error("No holdings found.")
+    client = st.session_state.get("client")
+
+    if not client:
+        st.warning("⚠️ Please login first from the Login page.")
+        return
+
+    try:
+        holdings = client.get_holdings()
+        if holdings:
+            st.success("Holdings fetched successfully ✅")
+            st.dataframe(holdings)  # Streamlit table view
+        else:
+            st.info("No holdings found.")
+    except Exception as e:
+        st.error(f"Failed to fetch holdings: {e}")
+
+if __name__ == "__main__":
+    show_portfolio()
