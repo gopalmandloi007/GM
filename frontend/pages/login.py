@@ -1,6 +1,6 @@
 # gm/frontend/pages/login.py
 import streamlit as st
-from backend.session import SessionManager
+from GM.backend.session import SessionManager
 
 def show_login():
     st.title("Login")
