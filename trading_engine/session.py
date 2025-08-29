@@ -1,51 +1,34 @@
-import logging
+import time
+import pyotp
 
 class SessionError(Exception):
-    """Custom exception for session-related errors"""
     pass
 
-
 class SessionManager:
-    """
-    Handles API session lifecycle (login, logout, refresh, etc.)
-    Stores credentials safely inside the manager.
-    """
-
-    def __init__(self, api_key: str, api_secret: str, totp_secret: str = None):
+    def __init__(self, api_key, api_secret, totp_secret=None):
         self.api_key = api_key
         self.api_secret = api_secret
         self.totp_secret = totp_secret
-        self._session = None
+        self.session_key = None
+        self.logged_in = False
+        self.create_session()
 
-    def login(self, client_cls):
-        """
-        Create a new session using client SDK
-        """
+    def create_session(self):
+        # Simulate API login
         try:
-            client = client_cls(self.api_key, self.api_secret, self.totp_secret)
-            self._session = client.login()
-            logging.info("Login successful")
-            return self._session
+            if self.totp_secret:
+                totp = pyotp.TOTP(self.totp_secret)
+                otp = totp.now()
+                # Use otp with api_key/api_secret to get session_key
+                self.session_key = f"session_{otp}"
+            else:
+                # Simple session without TOTP
+                self.session_key = f"session_{int(time.time())}"
+            self.logged_in = True
         except Exception as e:
-            logging.error(f"Login failed: {e}")
-            raise SessionError(str(e))
+            raise SessionError(f"Session creation failed: {e}")
 
     def get_session(self):
-        """
-        Return the current active session, if any
-        """
-        if not self._session:
-            raise SessionError("No active session. Please login first.")
-        return self._session
-
-    def logout(self):
-        """
-        Destroy the session
-        """
-        if self._session:
-            try:
-                self._session.logout()
-            except Exception:
-                pass
-        self._session = None
-        logging.info("Logged out successfully")
+        if not self.logged_in:
+            raise SessionError("Session not active")
+        return self.session_key
