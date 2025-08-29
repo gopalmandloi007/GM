@@ -1,4 +1,7 @@
 # gm/frontend/pages/login.py
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+
 import streamlit as st
 from gm.backend.session import SessionManager
 
