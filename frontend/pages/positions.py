@@ -1,22 +1,16 @@
 import streamlit as st
-import pandas as pd
-from trading_engine.positions import PositionsManager
+from trading_engine.positions import get_positions
 
-pm = PositionsManager()
+def app():
+    st.title("📌 Positions")
+    session = st.session_state.get("session")
 
-def show_positions():
-    st.title("📊 Positions Dashboard")
-
-    positions = pm.get_positions()
-    if not positions:
-        st.warning("No active positions.")
+    if not session:
+        st.warning("Please login first.")
         return
 
-    df = pd.DataFrame(positions)
-    st.dataframe(df, use_container_width=True)
-
-    summary = pm.get_positions_summary()
-    st.subheader("Summary")
-    st.metric("Total Buy Value", f"₹ {summary['buy_value']:.2f}")
-    st.metric("Total Sell Value", f"₹ {summary['sell_value']:.2f}")
-    st.metric("MTM P&L", f"₹ {summary['mtm']:.2f}")
+    try:
+        data = get_positions(session)
+        st.dataframe(data, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error fetching positions: {e}")
