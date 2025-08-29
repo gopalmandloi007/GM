@@ -21,18 +21,18 @@ st.title("🔐 Login — Definedge")
 st.markdown(
     """
     This page logs you into Definedge using credentials stored in `.streamlit/secrets.toml`.
-    - Make sure `DEFINEDGE_API_TOKEN` and `DEFINEDGE_API_SECRET` are present in secrets.
-    - `DEFINEDGE_TOTP_SECRET` is optional. If present, TOTP will be used automatically.
+    - Make sure `INTEGRATE_API_TOKEN` and `INTEGRATE_API_SECRET` are present in secrets.
+    - `INTEGRATE_TOTP_SECRET` is optional. If present, TOTP will be used automatically.
     """
 )
 
 # -- load secrets --
-API_TOKEN = st.secrets.get("DEFINEDGE_API_TOKEN")
-API_SECRET = st.secrets.get("DEFINEDGE_API_SECRET")
-TOTP_SECRET = st.secrets.get("DEFINEDGE_TOTP_SECRET")  # optional
+API_TOKEN = st.secrets.get("INTEGRATE_API_TOKEN")
+API_SECRET = st.secrets.get("INTEGRATE_API_SECRET")
+TOTP_SECRET = st.secrets.get("INTEGRATE_TOTP_SECRET")  # optional
 
 if not API_TOKEN or not API_SECRET:
-    st.error("Missing secrets. Add DEFINEDGE_API_TOKEN and DEFINEDGE_API_SECRET to .streamlit/secrets.toml")
+    st.error("Missing secrets. Add INTEGRATE_API_TOKEN and INTEGRATE_API_SECRET to .streamlit/secrets.toml")
     st.stop()
 
 # Persistent client in session_state
