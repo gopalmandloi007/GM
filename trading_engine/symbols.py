@@ -1,10 +1,10 @@
-# trading_engine/symbols.py
+# gm/trading_engine/symbols.py
 import os
 import zipfile
 import pandas as pd
 from typing import List
 from .api_client import APIClient
-from utils.file_manager import ensure_folder
+from utils.file_manager import ensure_folder, download_master_zip
 
 MASTER_DIR = "data/symbols"
 ensure_folder(MASTER_DIR)
@@ -12,15 +12,20 @@ MASTER_ALL_ZIP = os.path.join(MASTER_DIR, "allmaster.zip")
 MASTER_CSV = os.path.join(MASTER_DIR, "allmaster.csv")
 
 def save_master_zip(api_client: APIClient, url: str):
-    dest = MASTER_ALL_ZIP
-    api_client.download_master(url, dest)
-    # extract
-    with zipfile.ZipFile(dest, "r") as z:
-        z.extractall(MASTER_DIR)
+    dest_folder = MASTER_DIR
+    download_master_zip(url, dest_folder)
     # attempt to find csv
-    for f in os.listdir(MASTER_DIR):
+    for f in os.listdir(dest_folder):
         if f.lower().endswith(".csv"):
-            os.rename(os.path.join(MASTER_DIR, f), MASTER_CSV)
+            src = os.path.join(dest_folder, f)
+            dst = MASTER_CSV
+            try:
+                os.replace(src, dst)
+            except Exception:
+                try:
+                    os.rename(src, dst)
+                except Exception:
+                    pass
             break
     return MASTER_CSV
 
