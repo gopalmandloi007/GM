@@ -19,10 +19,8 @@ class SessionManager:
             if self.totp_secret:
                 totp = pyotp.TOTP(self.totp_secret)
                 otp = totp.now()
-                # Use otp with api_key/api_secret to get session_key
                 self.session_key = f"session_{otp}"
             else:
-                # Simple session without TOTP
                 self.session_key = f"session_{int(time.time())}"
             self.logged_in = True
         except Exception as e:
