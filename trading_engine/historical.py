@@ -1,59 +1,52 @@
 # trading_engine/historical.py
-
 import os
-import datetime
-from trading_engine.api_client import api_client
-from utils.file_manager import save_json, load_json
+from datetime import datetime, timedelta
+import pandas as pd
+from typing import Optional
+from utils.file_manager import read_csv_safe, ensure_folder
 
-DATA_DIR = "data/historical"
+HIST_DIR = "data/historical/day/NSE"
+ensure_folder("data/historical/day/NSE")
 
-def ensure_data_dir():
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
+def path_hist_day_nse(token: str) -> str:
+    return os.path.join(HIST_DIR, f"{token}.csv")
 
-def get_historical_data(symbol: str, start_date: str, end_date: str, interval: str = "1d"):
+def get_previous_trading_close(token: str, ref_dt: Optional[datetime]=None) -> Optional[float]:
     """
-    Fetches historical data for given symbol between dates.
-    Stores locally to avoid re-downloads.
+    Return last available trading day's close strictly before ref_dt (or today if not passed).
+    Looks for CSV at data/historical/day/NSE/{token}.csv
+    CSV expected to have a date/datetime column and close column (close).
     """
-    ensure_data_dir()
-    file_path = os.path.join(DATA_DIR, f"{symbol}_{interval}.json")
-
-    # Try cached data
-    cached = load_json(file_path)
-    if cached:
-        return cached
-
-    # Otherwise fetch from API
-    data = api_client.get_historical(symbol, start_date, end_date, interval)
-    save_json(file_path, data)
-    return data
-
-def get_previous_close(symbol: str, reference_date=None):
-    """
-    Get last available trading day's close (skips weekends/holidays).
-    """
-    ensure_data_dir()
-    if reference_date is None:
-        reference_date = datetime.date.today()
-
-    # Go back max 10 days to ensure we cover long weekends
-    start_date = reference_date - datetime.timedelta(days=10)
-    end_date = reference_date - datetime.timedelta(days=1)
-
-    data = api_client.get_historical(
-        symbol,
-        start_date.strftime("%Y-%m-%d"),
-        reference_date.strftime("%Y-%m-%d"),
-        interval="1d"
-    )
-
-    if not data:
+    if ref_dt is None:
+        ref_dt = datetime.now()
+    path = path_hist_day_nse(token)
+    df = read_csv_safe(path)
+    if df is None or df.empty:
         return None
-
-    # Last valid close
-    closes = [d for d in data if "close" in d]
-    if not closes:
+    # try common datetime column names
+    dt_cols = [c for c in df.columns if "date" in c.lower() or "time" in c.lower()]
+    if not dt_cols:
+        # assume first column is date-like
+        df.columns = ["datetime"] + df.columns.tolist()[1:]
+        dt_cols = ["datetime"]
+    dtc = dt_cols[0]
+    df[dtc] = pd.to_datetime(df[dtc], errors="coerce")
+    df = df.dropna(subset=[dtc])
+    df = df.sort_values(dtc)
+    cutoff = pd.to_datetime(ref_dt).normalize()
+    df_before = df[df[dtc] < cutoff]
+    if df_before.empty:
         return None
-
-    return closes[-1]["close"]
+    last = df_before.iloc[-1]
+    if "close" in last.index:
+        try:
+            return float(last["close"])
+        except Exception:
+            return None
+    # fallback: try last numeric column
+    for v in reversed(last.values):
+        try:
+            return float(v)
+        except Exception:
+            continue
+    return None
