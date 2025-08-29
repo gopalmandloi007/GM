@@ -1,29 +1,45 @@
-# trading_engine/positions.py
+# gm/trading_engine/positions.py
+from typing import Tuple, List, Dict, Any, Optional
+from .marketdata import get_ltp, MarketDataService
+from .historical import get_previous_trading_close
+from .api_client import APIClient
 
-from trading_engine.marketdata import get_ltp
-from trading_engine.historical import get_previous_close
-from trading_engine.api_client import api_client
+def get_positions_with_pnl(api_client: APIClient, market_service: Optional[MarketDataService] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    raw = api_client.get_positions()
+    # raw may be {"positions":[...]} or a list
+    if isinstance(raw, dict) and "positions" in raw:
+        positions = raw.get("positions") or []
+    elif isinstance(raw, list):
+        positions = raw
+    else:
+        # try other keys
+        positions = raw.get("data") if isinstance(raw, dict) and raw.get("data") else []
 
-def get_positions_with_pnl():
-    positions = api_client.get_positions()
     portfolio = []
-    total_invested = 0
-    total_current = 0
-    total_today_pnl = 0
-    total_overall_pnl = 0
+    total_invested = 0.0
+    total_current = 0.0
+    total_today_pnl = 0.0
+    total_overall_pnl = 0.0
 
     for p in positions:
-        symbol = p["symbol"]
-        qty = p["quantity"]   # can be positive (long) or negative (short)
-        buy_price = p.get("buy_price", 0)
+        # flexible field names
+        symbol = p.get("tradingsymbol") or p.get("symbol") or p.get("scrip") or p.get("token")
+        qty = float(p.get("quantity") or p.get("qty") or 0)
+        buy_price = float(p.get("buy_price") or p.get("avg_price") or p.get("avgPrice") or p.get("average_price") or 0)
 
-        ltp = get_ltp(symbol)
-        prev_close = get_previous_close(symbol)
+        # fetch ltp via market_service if provided, else module helper
+        if market_service:
+            md = market_service.get_ltp_prevclose(token=symbol)
+            ltp = md.get("lp")
+            prev_close = md.get("prev_close")
+        else:
+            ltp = get_ltp(symbol, api_client=api_client)
+            prev_close = get_previous_trading_close(symbol)
 
         invested = qty * buy_price
-        current_value = qty * ltp
+        current_value = qty * (ltp or 0)
         overall_pnl = current_value - invested
-        today_pnl = (ltp - prev_close) * qty if prev_close else 0
+        today_pnl = ( (ltp or 0) - (prev_close or 0) ) * qty if prev_close is not None else 0
 
         portfolio.append({
             "symbol": symbol,
