@@ -1,10 +1,12 @@
-# gm/trading_engine/portfolio.py
 from typing import Tuple, List, Dict, Any, Optional
 from .marketdata import get_ltp, MarketDataService
 from .historical import get_previous_trading_close
 from .api_client import APIClient
 
-def get_holdings(api_client: APIClient, market_service: Optional[MarketDataService] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+# ----------------------
+# Existing function
+# ----------------------
+def get_holdings_with_pnl(api_client: APIClient, market_service: Optional[MarketDataService] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     raw = api_client.get_holdings()
     if isinstance(raw, dict) and "holdings" in raw:
         holdings = raw.get("holdings") or []
@@ -62,3 +64,12 @@ def get_holdings(api_client: APIClient, market_service: Optional[MarketDataServi
     }
 
     return portfolio, summary
+
+# ----------------------
+# New alias function for frontend
+# ----------------------
+def get_holdings(api_client: APIClient):
+    """
+    Alias for get_holdings_with_pnl to maintain frontend compatibility.
+    """
+    return get_holdings_with_pnl(api_client)
