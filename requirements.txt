@@ -4,3 +4,4 @@ websocket-client
 pyotp
 pandas
 matplotlib
+python-dotenv
