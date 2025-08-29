@@ -1,56 +1,40 @@
-# frontend/pages/02_portfolio.py
 import streamlit as st
-import matplotlib.pyplot as plt
-from trading_engine.portfolio import PortfolioManager
-from trading_engine.session import SessionManager
+import pandas as pd
+import plotly.graph_objects as go
+from trading_engine.portfolio import get_holdings
+from trading_engine.historical import get_prev_close
 
-def app():
-    st.header("📊 Portfolio")
-    if "api_client" not in st.session_state:
-        st.info("Login first (open Login page).")
-        return
-    pm: PortfolioManager = st.session_state.portfolio_mgr
-    if st.button("Refresh"):
-        st.session_state.holdings_df = pm.fetch_holdings_table()
-        st.session_state.positions_df = pm.fetch_positions_table()
+st.set_page_config(page_title="Portfolio Dashboard", layout="wide")
 
-    holdings = st.session_state.get("holdings_df") or pm.fetch_holdings_table()
-    positions = st.session_state.get("positions_df") or pm.fetch_positions_table()
-    summary = pm.portfolio_summary()
+st.title("📊 Portfolio Dashboard")
 
-    cols = st.columns(4)
-    cols[0].metric("Total Invested", f"₹ {summary['total_invested']:.2f}")
-    cols[1].metric("Current Value", f"₹ {summary['total_current_value']:.2f}")
-    cols[2].metric("Today P&L", f"₹ {summary['todays_pnl']:.2f}")
-    cols[3].metric("Overall Unrealized", f"₹ {summary['overall_unrealized']:.2f}")
+# Fetch Holdings
+holdings = get_holdings()
+if holdings.empty:
+    st.warning("No Holdings Found")
+else:
+    # Add Previous Close & Calculate Today P&L
+    holdings["prev_close"] = holdings["symbol"].apply(get_prev_close)
+    holdings["today_pnl"] = (holdings["ltp"] - holdings["prev_close"]) * holdings["quantity"]
+    holdings["unrealized"] = (holdings["ltp"] - holdings["avg_price"]) * holdings["quantity"]
 
-    st.subheader("Holdings")
-    if holdings is None or holdings.empty:
-        st.info("No holdings")
-    else:
-        st.dataframe(holdings, use_container_width=True)
-        a,b = st.columns([1,1])
-        with a:
-            try:
-                fig, ax = plt.subplots(figsize=(4,3))
-                ax.pie(holdings["invested"].tolist(), labels=holdings["symbol"].tolist(), autopct='%1.1f%%', startangle=140)
-                ax.axis('equal')
-                st.pyplot(fig)
-            except Exception as e:
-                st.write("Pie chart error:", e)
-        with b:
-            try:
-                fig2, ax2 = plt.subplots(figsize=(6,3))
-                ax2.bar(holdings["symbol"].tolist(), holdings["overall_unrealized"].tolist())
-                ax2.set_title("Unrealized P&L")
-                ax2.set_ylabel("₹")
-                plt.xticks(rotation=45, ha='right')
-                st.pyplot(fig2)
-            except Exception as e:
-                st.write("Bar chart error:", e)
+    total_invested = (holdings["avg_price"] * holdings["quantity"]).sum()
+    current_value = (holdings["ltp"] * holdings["quantity"]).sum()
+    today_pnl = holdings["today_pnl"].sum()
+    overall_unrealized = holdings["unrealized"].sum()
 
-    st.subheader("Positions")
-    if positions is None or positions.empty:
-        st.info("No positions")
-    else:
-        st.dataframe(positions, use_container_width=True)
+    # Summary Cards
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Invested", f"₹ {total_invested:,.2f}")
+    col2.metric("Current Value", f"₹ {current_value:,.2f}")
+    col3.metric("Today P&L", f"₹ {today_pnl:,.2f}", delta=f"{today_pnl:,.2f}")
+    col4.metric("Overall Unrealized", f"₹ {overall_unrealized:,.2f}", delta=f"{overall_unrealized:,.2f}")
+
+    # Holdings Table
+    st.subheader("Holdings Detail")
+    st.dataframe(holdings[["symbol", "quantity", "avg_price", "ltp", "prev_close", "today_pnl", "unrealized"]], use_container_width=True)
+
+    # Pie Chart (Compact)
+    fig = go.Figure(data=[go.Pie(labels=holdings["symbol"], values=holdings["ltp"] * holdings["quantity"], hole=0.5)])
+    fig.update_layout(height=300, margin=dict(l=10, r=10, t=30, b=10))
+    st.plotly_chart(fig, use_container_width=True)
