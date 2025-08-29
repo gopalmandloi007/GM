@@ -1,4 +1,4 @@
-# trading_engine/marketdata.py
+# gm/trading_engine/marketdata.py
 import logging
 import time
 from typing import Optional, Dict, Any
@@ -10,7 +10,7 @@ logger = logging.getLogger("trading_engine.marketdata")
 logger.setLevel(logging.INFO)
 
 class MarketDataService:
-    def __init__(self, api_client: Optional[APIClient]=None, ws_mgr: Optional[WebSocketManager]=None):
+    def __init__(self, api_client: Optional[APIClient] = None, ws_mgr: Optional[WebSocketManager] = None):
         self.api_client = api_client
         self.ws_mgr = ws_mgr
 
@@ -76,15 +76,9 @@ class MarketDataService:
         prev = get_previous_trading_close(token)
         return {"lp": None, "prev_close": (float(prev) if prev is not None else None), "source": "file", "ts": ts}
 
-# trading_engine/marketdata.py (last me add karo)
 
-# Global helper to maintain compatibility with portfolio.py
-    def get_ltp(symbol: str, exchange: str = "NSE", api_client: Optional[APIClient] = None) -> Optional[float]:
-        """
-        Simple helper to fetch only LTP for a symbol.
-        Uses MarketDataService internally.
-        """
-        service = MarketDataService(api_client=api_client)
-        data = service.get_ltp_prevclose(token=symbol, exchange=exchange)
-        return data.get("lp")
-
+# Module-level helper (fixed indentation)
+def get_ltp(symbol: str, exchange: str = "NSE", api_client: Optional[APIClient] = None, ws_mgr: Optional[WebSocketManager] = None) -> Optional[float]:
+    service = MarketDataService(api_client=api_client, ws_mgr=ws_mgr)
+    data = service.get_ltp_prevclose(token=symbol, exchange=exchange)
+    return data.get("lp")
