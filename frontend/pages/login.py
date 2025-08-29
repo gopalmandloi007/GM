@@ -1,6 +1,6 @@
 # gm/frontend/pages/login.py
 import streamlit as st
-from GM.backend.session import SessionManager
+from backend.session import SessionManager
 
 def show_login():
     st.title("Login")
@@ -13,9 +13,9 @@ def show_login():
             try:
                 # SessionManager ko secrets se initialize karo
                 session_manager = SessionManager(
-                    api_token=st.secrets["INTEGRATE_API_TOKEN"],
-                    api_secret=st.secrets["INTEGRATE_API_SECRET"],
-                    totp_secret=st.secrets.get("TOTP_SECRET")
+                    api_token=st.secrets["DEFINEDGE_API_TOKEN"],
+                    api_secret=st.secrets["DEFINEDGE_API_SECRET"],
+                    totp_secret=st.secrets.get("DEFINEDGE_TOTP_SECRET")
                 )
                 
                 # Yeh actually login karega
