@@ -1,3 +1,4 @@
 # trading_engine/__init__.py
-__version__ = "0.1.0"
-# Keep this file minimal to avoid circular imports.
+from .api_client import APIClient
+from .session import SessionManager, SessionError
+from .orders import place_order, get_orders
