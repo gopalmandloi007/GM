@@ -1,61 +1,90 @@
 # gm/frontend/pages/Portfolio.py
 import streamlit as st
-import pandas as pd
+import sys, os
 import json
-from gm.backend.portfolio import get_holdings  # backend module
+import pandas as pd
 
-st.set_page_config(page_title="Portfolio", layout="wide")
-st.title("📊 Portfolio")
+# -------------------------
+# DEBUG / IMPORT FIX
+# -------------------------
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+    st.write(f"✅ ROOT added to sys.path: {ROOT}")
 
-# Utility function: safe JSON parse
+try:
+    from backend.portfolio import get_holdings  # backend module
+except Exception as e:
+    st.error(f"Backend import failed: {e}")
+    st.stop()
+
+# -------------------------
+# HELPER: safe JSON load
+# -------------------------
 def safe_json_load(s):
     try:
-        return json.loads(s) if isinstance(s, str) else s
+        if isinstance(s, str):
+            return json.loads(s)
+        return s
     except Exception as e:
         st.error(f"JSON parse error: {e}")
         return None
 
-# Fetch holdings
+# -------------------------
+# PAGE TITLE
+# -------------------------
+st.title("📊 Portfolio")
+
+# -------------------------
+# Check login / client
+# -------------------------
 client = st.session_state.get("client")
-if client is None:
-    st.warning("⚠️ Login first to fetch holdings.")
+if not client:
+    st.warning("Please login first on Login page.")
     st.stop()
 
+# -------------------------
+# Fetch holdings
+# -------------------------
 try:
-    raw_holdings = get_holdings(client)
-    if not raw_holdings or "data" not in raw_holdings:
-        st.warning("⚠️ No valid holdings to display.")
-    else:
-        # debug: show raw JSON
-        st.subheader("🔍 Raw holdings from API:")
-        st.json(raw_holdings)
-
-        # Flatten holdings for table
-        table_rows = []
-        for item in raw_holdings.get("data", []):
-            tradings = item.get("tradingsymbol", [])
-            for t in tradings:
-                table_rows.append({
-                    "Symbol": t.get("tradingsymbol"),
-                    "Exchange": t.get("exchange"),
-                    "ISIN": t.get("isin"),
-                    "Lot Size": t.get("lotsize"),
-                    "Avg Buy Price": item.get("avg_buy_price"),
-                    "Holding Qty": item.get("dp_qty"),
-                    "T1 Qty": item.get("t1_qty"),
-                    "Collateral Qty": item.get("collateral_qty"),
-                    "Holding Used": item.get("holding_used"),
-                    "Trade Qty": item.get("trade_qty"),
-                    "Sell Amt": item.get("sell_amt"),
-                    "Haircut": item.get("haircut"),
-                })
-
-        if table_rows:
-            df = pd.DataFrame(table_rows)
-            st.subheader("💹 Holdings Table")
-            st.dataframe(df, use_container_width=True)
-        else:
-            st.warning("⚠️ No holdings available after parsing.")
-
+    raw = get_holdings(client)
+    st.subheader("🔍 Raw holdings from API:")
+    st.code(raw, language="json")
 except Exception as e:
     st.error(f"Failed to fetch holdings: {e}")
+    st.stop()
+
+# -------------------------
+# Parse and display table
+# -------------------------
+data = safe_json_load(raw)
+if not data or "data" not in data or not data["data"]:
+    st.warning("⚠️ No valid holdings to display.")
+else:
+    rows = []
+    for item in data["data"]:
+        dp_qty = item.get("dp_qty")
+        avg_price = item.get("avg_buy_price")
+        holding_used = item.get("holding_used")
+        sell_amt = item.get("sell_amt")
+        trade_qty = item.get("trade_qty")
+        haircut = item.get("haircut")
+        t1_qty = item.get("t1_qty")
+        
+        # Iterate over all tradingsymbols
+        for ts in item.get("tradingsymbol", []):
+            rows.append({
+                "Symbol": ts.get("tradingsymbol"),
+                "Exchange": ts.get("exchange"),
+                "Token": ts.get("token"),
+                "DP Qty": dp_qty,
+                "T1 Qty": t1_qty,
+                "Holding Used": holding_used,
+                "Avg Buy Price": avg_price,
+                "Trade Qty": trade_qty,
+                "Sell Amount": sell_amt,
+                "Haircut": haircut
+            })
+    df = pd.DataFrame(rows)
+    st.subheader("💹 Holdings Table")
+    st.dataframe(df, use_container_width=True)
