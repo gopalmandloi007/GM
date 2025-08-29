@@ -1,5 +1,5 @@
 import streamlit as st
-from gm.backend.session import SessionManager
+from backend.session import SessionManager
 
 def show_login():
     st.title("Login")
