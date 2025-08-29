@@ -1,66 +1,63 @@
-# gm/frontend/pages/Portfolio.py
+import json
+import re
 import streamlit as st
 import pandas as pd
-import json
 
+
+# --- Fix JSON issues before parsing ---
 def safe_json_load(s):
-    """Safely load JSON string"""
+    if isinstance(s, dict):
+        return s
+    if not isinstance(s, str):
+        return {}
+
+    # Clean common JSON errors
+    s = s.strip()
+    s = re.sub(r'("status":"SUCCESS")\s*("data")', r'\1,\2', s)  # add missing comma
+    s = re.sub(r'(\d+):', r'"\1":', s)  # convert 0: -> "0":
+    s = s.replace("\n", "")  # remove newlines
+
     try:
-        return json.loads(s) if isinstance(s, str) else s
+        return json.loads(s)
     except Exception as e:
-        st.write("❌ JSON parse error:", s, e)
-        return None
+        st.error(f"❌ JSON parse error: {e}")
+        st.code(s, language="json")
+        return {}
 
-def show_portfolio():
-    st.title("📊 Portfolio")
 
-    client = st.session_state.get("client")
+# --- Streamlit Page ---
+st.title("📊 Portfolio")
 
-    if not client:
-        st.warning("⚠️ Please login first from the Login page.")
-        return
+# Dummy: replace with your API call
+raw_response = st.session_state.get("raw_holdings", None)
 
-    try:
-        raw_holdings = client.get_holdings()
+if raw_response:
+    holdings_data = safe_json_load(raw_response)
 
-        st.write("🔍 Raw holdings from API:", raw_holdings)  # 👈 debug
+    if holdings_data.get("status") == "SUCCESS" and "data" in holdings_data:
+        data = holdings_data["data"]
 
-        if not raw_holdings:
-            st.info("No holdings found.")
-            return
+        # Flatten portfolio for DataFrame
+        rows = []
+        for item in data.values() if isinstance(data, dict) else data:
+            qty = int(item.get("dp_qty", 0))
+            avg_price = float(item.get("avg_buy_price", 0))
+            symbol = item.get("tradingsymbol", [{}])[0].get("tradingsymbol", "")
 
-        holdings_list = []
-        for h in raw_holdings:
-            parsed = safe_json_load(h)
-            if not parsed:
-                continue  # skip invalid/empty entries
-
-            ts = {}
-            if isinstance(parsed.get("tradingsymbol"), list) and len(parsed["tradingsymbol"]) > 0:
-                ts = next((t for t in parsed["tradingsymbol"] if t.get("exchange") == "NSE"), parsed["tradingsymbol"][0])
-
-            holdings_list.append({
-                "Symbol": ts.get("tradingsymbol", ""),
-                "Exchange": ts.get("exchange", ""),
-                "ISIN": ts.get("isin", ""),
-                "Qty": parsed.get("dp_qty", "0"),
-                "Used Qty": parsed.get("holding_used", "0"),
-                "Buy Price": parsed.get("avg_buy_price", "0"),
-                "Sell Amount": parsed.get("sell_amt", "0"),
-                "Haircut": parsed.get("haircut", "0"),
+            rows.append({
+                "Symbol": symbol,
+                "Quantity": qty,
+                "Avg Buy Price": avg_price,
+                "Holding Used": item.get("holding_used", 0),
+                "Sell Amount": float(item.get("sell_amt", 0))
             })
 
-        if not holdings_list:
-            st.info("⚠️ No valid holdings to display.")
-            return
-
-        df = pd.DataFrame(holdings_list)
-
-        st.success("Holdings fetched successfully ✅")
-        st.dataframe(df)
-
-    except Exception as e:
-        st.error(f"Failed to fetch holdings: {e}")
-
-if __name__ == "__main__":
-    show_portfolio()
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("⚠️ No valid holdings to display.")
+    else:
+        st.warning("⚠️ No valid holdings to display.")
+else:
+    st.info("ℹ️ No raw holdings found in session. Please fetch from API.")
