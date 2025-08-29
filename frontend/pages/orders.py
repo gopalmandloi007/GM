@@ -1,26 +1,22 @@
 import streamlit as st
-from trading_engine.orders import place_order, get_all_symbols
+from trading_engine.orders import place_order
 
-st.set_page_config(page_title="Orders Dashboard", layout="wide")
+def app():
+    st.title("📝 Place Order")
+    session = st.session_state.get("session")
 
-st.title("📝 Place Order")
+    if not session:
+        st.warning("Please login first.")
+        return
 
-# Fetch All Symbols (from local db / api)
-symbols = get_all_symbols()
+    symbol = st.text_input("Symbol", "NIFTY")
+    qty = st.number_input("Quantity", min_value=1, value=1)
+    price = st.number_input("Price", min_value=0.0, value=0.0)
+    side = st.selectbox("Side", ["BUY", "SELL"])
 
-# Order Form
-with st.form("order_form", clear_on_submit=True):
-    side = st.radio("Order Side", ["BUY", "SELL"], horizontal=True)
-    symbol = st.selectbox("Select Symbol", symbols, index=0)
-    qty = st.number_input("Quantity", min_value=1, step=1)
-    price = st.number_input("Price (₹)", min_value=0.0, step=0.05, format="%.2f")
-    order_type = st.selectbox("Order Type", ["MARKET", "LIMIT"])
-
-    submitted = st.form_submit_button("🚀 Place Order")
-
-    if submitted:
-        result = place_order(symbol, side, qty, price, order_type)
-        if result.get("status") == "success":
-            st.success(f"✅ Order Placed: {side} {qty} {symbol} @ {price if order_type=='LIMIT' else 'MKT'}")
-        else:
-            st.error(f"❌ Failed: {result.get('message')}")
+    if st.button("Submit Order"):
+        try:
+            resp = place_order(session, symbol, qty, price, side)
+            st.success(f"Order placed: {resp}")
+        except Exception as e:
+            st.error(f"Failed: {e}")
