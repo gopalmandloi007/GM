@@ -1,71 +1,61 @@
 # gm/frontend/pages/Portfolio.py
 import streamlit as st
-import sys
-import os
-import json
 import pandas as pd
+import json
+from gm.backend.portfolio import get_holdings  # backend module
 
-# ----------- DEBUG: Add project root to sys.path ----------
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-st.write("📂 Current Working Directory:", os.getcwd())
-st.write("🐍 sys.path before adding ROOT:", sys.path)
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
-st.write("✅ ROOT added to sys.path:", ROOT)
-st.write("🐍 sys.path after adding ROOT:", sys.path)
+st.set_page_config(page_title="Portfolio", layout="wide")
+st.title("📊 Portfolio")
 
-# ----------- Import backend safely ----------
-try:
-    from backend.holdings import get_holdings
-    st.write("✅ Backend import successful")
-except Exception as e:
-    st.error(f"Backend import failed: {e}")
-    st.stop()
-
-# ----------- Debugging function to safely load JSON ----------
+# Utility function: safe JSON parse
 def safe_json_load(s):
     try:
         return json.loads(s) if isinstance(s, str) else s
     except Exception as e:
-        st.error(f"❌ JSON parse error: {e}")
-        st.write("Raw data:", s)
+        st.error(f"JSON parse error: {e}")
         return None
 
-# ----------- Main Portfolio Display ----------
-st.title("📊 Portfolio")
-
-client = st.session_state.get("client", None)
+# Fetch holdings
+client = st.session_state.get("client")
 if client is None:
-    st.warning("Please login first via the Login page.")
+    st.warning("⚠️ Login first to fetch holdings.")
     st.stop()
 
-# Fetch holdings from backend
 try:
     raw_holdings = get_holdings(client)
-    st.subheader("🔍 Raw holdings from API:")
-    st.write(raw_holdings)
+    if not raw_holdings or "data" not in raw_holdings:
+        st.warning("⚠️ No valid holdings to display.")
+    else:
+        # debug: show raw JSON
+        st.subheader("🔍 Raw holdings from API:")
+        st.json(raw_holdings)
+
+        # Flatten holdings for table
+        table_rows = []
+        for item in raw_holdings.get("data", []):
+            tradings = item.get("tradingsymbol", [])
+            for t in tradings:
+                table_rows.append({
+                    "Symbol": t.get("tradingsymbol"),
+                    "Exchange": t.get("exchange"),
+                    "ISIN": t.get("isin"),
+                    "Lot Size": t.get("lotsize"),
+                    "Avg Buy Price": item.get("avg_buy_price"),
+                    "Holding Qty": item.get("dp_qty"),
+                    "T1 Qty": item.get("t1_qty"),
+                    "Collateral Qty": item.get("collateral_qty"),
+                    "Holding Used": item.get("holding_used"),
+                    "Trade Qty": item.get("trade_qty"),
+                    "Sell Amt": item.get("sell_amt"),
+                    "Haircut": item.get("haircut"),
+                })
+
+        if table_rows:
+            df = pd.DataFrame(table_rows)
+            st.subheader("💹 Holdings Table")
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("⚠️ No holdings available after parsing.")
+
 except Exception as e:
     st.error(f"Failed to fetch holdings: {e}")
-    st.stop()
-
-# Parse and display in table
-holdings_data = safe_json_load(raw_holdings)
-if holdings_data and "data" in holdings_data and holdings_data["data"]:
-    rows = []
-    for h in holdings_data["data"]:
-        for ts in h.get("tradingsymbol", []):
-            rows.append({
-                "Symbol": ts.get("tradingsymbol"),
-                "Exchange": ts.get("exchange"),
-                "Qty (DP)": h.get("dp_qty"),
-                "Qty (Trade)": h.get("trade_qty"),
-                "Holding Used": h.get("holding_used"),
-                "Avg Buy Price": h.get("avg_buy_price"),
-                "Sell Amt": h.get("sell_amt"),
-                "Haircut": h.get("haircut")
-            })
-    df = pd.DataFrame(rows)
-    st.subheader("💹 Portfolio Table")
-    st.dataframe(df)
-else:
-    st.warning("⚠️ No valid holdings to display.")
