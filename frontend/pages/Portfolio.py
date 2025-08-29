@@ -3,6 +3,13 @@ import streamlit as st
 import pandas as pd
 import json
 
+def safe_json_load(s):
+    """Safely load JSON string"""
+    try:
+        return json.loads(s) if isinstance(s, str) else s
+    except Exception:
+        return None
+
 def show_portfolio():
     st.title("📊 Portfolio")
 
@@ -19,14 +26,16 @@ def show_portfolio():
             st.info("No holdings found.")
             return
 
-        # Parse each holding JSON string into dict
         holdings_list = []
         for h in raw_holdings:
-            if isinstance(h, str):  # convert string to dict
-                h = json.loads(h)
+            h = safe_json_load(h)
+            if not h:
+                continue  # skip invalid/empty entries
 
-            # Take first tradingsymbol (NSE preferred)
-            ts = h.get("tradingsymbol", [{}])[0]
+            ts = {}
+            if isinstance(h.get("tradingsymbol"), list) and len(h["tradingsymbol"]) > 0:
+                # prefer NSE
+                ts = next((t for t in h["tradingsymbol"] if t.get("exchange") == "NSE"), h["tradingsymbol"][0])
 
             holdings_list.append({
                 "Symbol": ts.get("tradingsymbol", ""),
@@ -39,7 +48,10 @@ def show_portfolio():
                 "Haircut": h.get("haircut", "0"),
             })
 
-        # Convert to DataFrame
+        if not holdings_list:
+            st.info("⚠️ No valid holdings to display.")
+            return
+
         df = pd.DataFrame(holdings_list)
 
         st.success("Holdings fetched successfully ✅")
