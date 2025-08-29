@@ -75,3 +75,16 @@ class MarketDataService:
 
         prev = get_previous_trading_close(token)
         return {"lp": None, "prev_close": (float(prev) if prev is not None else None), "source": "file", "ts": ts}
+
+# trading_engine/marketdata.py (last me add karo)
+
+# Global helper to maintain compatibility with portfolio.py
+    def get_ltp(symbol: str, exchange: str = "NSE", api_client: Optional[APIClient] = None) -> Optional[float]:
+        """
+        Simple helper to fetch only LTP for a symbol.
+        Uses MarketDataService internally.
+        """
+        service = MarketDataService(api_client=api_client)
+        data = service.get_ltp_prevclose(token=symbol, exchange=exchange)
+        return data.get("lp")
+
