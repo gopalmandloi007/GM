@@ -24,9 +24,9 @@ def show_login():
                 st.write("🔑 Creating SessionManager...")
 
                 session_manager = SessionManager(
-                    api_token=st.secrets["DEFINEDGE_API_TOKEN"],
-                    api_secret=st.secrets["DEFINEDGE_API_SECRET"],
-                    totp_secret=st.secrets.get("DEFINEDGE_TOTP_SECRET")
+                    api_token=st.secrets["INTEGRATE_API_TOKEN"],
+                    api_secret=st.secrets["INTEGRATE_API_SECRET"],
+                    totp_secret=st.secrets.get("TOTP_SECRET")
                 )
                 
                 st.write("⚡ Calling create_session() ...")
