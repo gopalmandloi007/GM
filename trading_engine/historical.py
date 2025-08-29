@@ -1,4 +1,4 @@
-# trading_engine/historical.py
+# gm/trading_engine/historical.py
 import os
 from datetime import datetime, timedelta
 import pandas as pd
@@ -6,12 +6,12 @@ from typing import Optional
 from utils.file_manager import read_csv_safe, ensure_folder
 
 HIST_DIR = "data/historical/day/NSE"
-ensure_folder("data/historical/day/NSE")
+ensure_folder(HIST_DIR)
 
 def path_hist_day_nse(token: str) -> str:
     return os.path.join(HIST_DIR, f"{token}.csv")
 
-def get_previous_trading_close(token: str, ref_dt: Optional[datetime]=None) -> Optional[float]:
+def get_previous_trading_close(token: str, ref_dt: Optional[datetime] = None) -> Optional[float]:
     """
     Return last available trading day's close strictly before ref_dt (or today if not passed).
     Looks for CSV at data/historical/day/NSE/{token}.csv
