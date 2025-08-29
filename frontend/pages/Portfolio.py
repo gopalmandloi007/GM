@@ -5,7 +5,7 @@ import json
 
 # Import backend API
 try:
-    from backend.holdings import get_holdings
+    from gm.backend.holdings import get_holdings
 except Exception as e:
     st.error(f"Backend import failed: {e}")
     st.stop()
